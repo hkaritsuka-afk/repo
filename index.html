@@ -1,83 +1,103 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <title>卸検品QR/JANスキャン</title>
-  <script src="https://unpkg.com/html5-qrcode@2.3.7/minified/html5-qrcode.min.js"></script>
-  <style>
-    body { font-family: "Segoe UI", sans-serif; text-align: center; margin: 20px; background: #f0f4f8;}
-    h1 { color: #2b8a3e; }
-    #reader { width: 300px; margin: 20px auto; border: 2px solid #2b8a3e; border-radius: 10px;}
-    #log { background: white; border: 1px solid #ccc; border-radius: 8px; width: 90%; max-width: 400px; margin: 20px auto; padding: 10px; text-align: left; font-size: 14px; height: 180px; overflow-y:auto;}
-    button { padding: 10px 20px; margin: 5px; border: none; border-radius: 8px; background-color: #2b8a3e; color: white; font-size: 16px; cursor: pointer;}
-    button:hover { background-color: #1d6e30;}
-  </style>
+<meta charset="UTF-8">
+<title>卸検品QR/JANスキャン</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.7/minified/html5-qrcode.min.js"></script>
+<style>
+body { font-family: "Segoe UI", sans-serif; text-align: center; background:#f0f4f8; margin:20px;}
+h1 { color:#2b8a3e; }
+#reader { width:300px; margin:20px auto; border:2px solid #2b8a3e; border-radius:10px; }
+#log { background:white; border:1px solid #ccc; border-radius:8px; width:90%; max-width:400px; margin:20px auto; padding:10px; text-align:left; font-size:14px; height:180px; overflow-y:auto; }
+button { padding:10px 20px; margin:5px; border:none; border-radius:8px; background-color:#2b8a3e; color:white; font-size:16px; cursor:pointer; }
+button:hover { background-color:#1d6e30; }
+</style>
 </head>
 <body>
-  <h1>卸検品QR/JANスキャン</h1>
+<h1>卸検品QR/JANスキャン</h1>
 
-  <div id="reader"></div>
-  <div>
-    <button onclick="startScanner()">📱 カメラ起動</button>
-  </div>
-  <div id="log"></div>
+<div id="reader"></div>
+<div>
+  <button onclick="startScanner()">📱 カメラ起動</button>
+  <button onclick="switchCamera()">🔄 カメラ切替</button>
+</div>
+<div id="log"></div>
 
-  <audio id="beep-sound" src="https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg" preload="auto"></audio>
+<script>
+let html5QrCode;
+let lastScanTime = 0;
+let devices = [];
+let currentCameraIndex = 0;
 
-  <script>
-    let html5QrCode;
-    let lastScanTime = 0;
+// 読み込み音
+const audio = new Audio("https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg");
 
-    function append(message) {
-      const log = document.getElementById("log");
-      log.innerHTML += message + "<br>";
-      log.scrollTop = log.scrollHeight;
+function appendLog(msg){
+  const log = document.getElementById("log");
+  log.innerHTML += msg + "<br>";
+  log.scrollTop = log.scrollHeight;
+}
+
+// スプレッドシートに送信
+async function sendToSheet(text){
+  try{
+    const res = await fetch("https://script.google.com/macros/s/AKfycbwZod-o3kYJKMBvosKZOQ_NrlvZJCYbht6c8AFaX5EPfJGnICKMakMRKdPkeVlvgcnD/exec",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({text:text})
+    });
+    const json = await res.json();
+    if(json.status==="ok"){
+      appendLog(`✅ 書き込み完了: V${json.row}`);
+      audio.play();
+    } else {
+      appendLog(`❌ 書き込み失敗: ${json.message}`);
     }
+  } catch(err){
+    appendLog(`❌ 書き込み失敗: ${err}`);
+  }
+}
 
-    async function startScanner() {
-      html5QrCode = new Html5Qrcode("reader");
-      const config = { fps: 10, qrbox: 250, formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE, Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.EAN_13] };
+// カメラ起動
+async function startScanner(){
+  if(!html5QrCode) html5QrCode = new Html5Qrcode("reader");
 
-      try {
-        const devices = await Html5Qrcode.getCameras();
-        if (devices.length === 0) throw new Error("カメラが見つかりません");
+  try{
+    devices = await Html5Qrcode.getCameras();
+    if(devices.length===0) throw new Error("カメラが見つかりません");
+    // 背面カメラ優先
+    currentCameraIndex = devices.findIndex(d => d.label.toLowerCase().includes("back"));
+    if(currentCameraIndex<0) currentCameraIndex = 0;
+    await html5QrCode.start(devices[currentCameraIndex].id,{
+      fps:10,
+      qrbox:250
+    }, onScanSuccess);
+    appendLog(`📱 カメラ起動: ${devices[currentCameraIndex].label}`);
+  } catch(err){
+    appendLog(`❌ カメラ起動失敗: ${err}`);
+  }
+}
 
-        // 背面カメラ優先
-        let rearCamera = devices.find(d => d.facingMode === "environment") || devices[0];
-        await html5QrCode.start(rearCamera.id, config, onScanSuccess);
-        append("📱 カメラ起動成功: " + rearCamera.label);
-      } catch(err) {
-        append("❌ カメラ起動失敗: " + err);
-      }
-    }
+// カメラ切替
+async function switchCamera(){
+  if(devices.length<2) return;
+  await html5QrCode.stop();
+  currentCameraIndex = (currentCameraIndex+1)%devices.length;
+  await html5QrCode.start(devices[currentCameraIndex].id,{
+    fps:10,
+    qrbox:250
+  }, onScanSuccess);
+  appendLog(`🔄 カメラ切替: ${devices[currentCameraIndex].label}`);
+}
 
-    function onScanSuccess(decodedText) {
-      const now = Date.now();
-      if (now - lastScanTime < 3000) return; // 3秒間隔
-      lastScanTime = now;
-
-      append("読み取り: " + decodedText);
-      document.getElementById("beep-sound").play();
-      sendToSheet(decodedText);
-    }
-
-    async function sendToSheet(text){
-      try{
-        const res = await fetch("https://script.google.com/macros/s/AKfycbygA6hBRmcOqsITWi5cAjnEdDFccIgzNAT7nUwENaB7DaNU6DqaW8yJ8ib71Xbc553w/exec",{
-          method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body: JSON.stringify({text:text})
-        });
-        const json = await res.json();
-        if(json.status==="ok"){
-          append("✅ "+json.message);
-        }else{
-          append("❌ 書き込み失敗: "+json.message);
-        }
-      } catch(err){
-        append("❌ 書き込み失敗: "+err);
-      }
-    }
-  </script>
+// 読み取り成功
+function onScanSuccess(decodedText){
+  const now = Date.now();
+  if(now - lastScanTime < 3000) return; // 3秒間隔
+  lastScanTime = now;
+  appendLog(`読み取り: ${decodedText}`);
+  sendToSheet(decodedText);
+}
+</script>
 </body>
 </html>
