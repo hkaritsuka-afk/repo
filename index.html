@@ -2,101 +2,92 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>卸検品スキャン</title>
-<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
+<title>卸検品QR/バーコードスキャン</title>
 <style>
-body { font-family:"Segoe UI",sans-serif; text-align:center; background:#f0f4f8; margin:0; padding:0; }
-h1 { color:#2b8a3e; margin:20px 0; }
-#video-container { position: relative; display:inline-block; margin-top:10px; }
-video { width:300px; height:300px; border:2px solid #2b8a3e; border-radius:10px; }
-#controls { margin-top:10px; }
-button { margin:5px; padding:10px 15px; font-size:16px; border:none; border-radius:8px; background:#2b8a3e; color:white; cursor:pointer; }
-button:hover { background:#1d6e30; }
-#log { width:90%; max-width:400px; margin:10px auto; padding:10px; background:white; border:1px solid #ccc; border-radius:8px; text-align:left; font-size:14px; height:180px; overflow-y:auto; }
+body { font-family:"Segoe UI",sans-serif; text-align:center; margin:20px; background:#f0f4f8;}
+h1 { color:#2b8a3e;}
+#reader { width:300px; height:300px; margin:20px auto; border:2px solid #2b8a3e; border-radius:10px;}
+#log { background:white; border:1px solid #ccc; border-radius:8px; width:90%; max-width:400px; margin:20px auto; padding:10px; text-align:left; font-size:14px; height:180px; overflow-y:auto;}
+button { padding:10px 20px; margin:5px; border:none; border-radius:8px; background-color:#2b8a3e; color:white; font-size:16px; cursor:pointer;}
+button:hover { background-color:#1d6e30;}
 </style>
 </head>
 <body>
-<h1>卸検品 QR / JAN スキャン</h1>
-
-<div id="video-container">
-  <video id="video" autoplay muted></video>
-</div>
-
-<div id="controls">
-  <button onclick="startCamera()">📱 カメラ起動</button>
+<h1>卸検品QR/バーコードスキャン</h1>
+<video id="reader" autoplay playsinline></video>
+<div>
+  <button onclick="startScanner()">📱 カメラ起動</button>
   <button onclick="switchCamera()">🔄 カメラ切替</button>
 </div>
-
 <div id="log"></div>
 
+<audio id="beep" src="https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg" preload="auto"></audio>
+
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
 <script>
 let selectedDeviceId = null;
 let devices = [];
-let currentIndex = 0;
 let codeReader = null;
-let lastScanTime = 0;
-const log = document.getElementById("log");
-const video = document.getElementById("video");
-const beep = new Audio("https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg");
+let lastScan = 0;
 
-function appendLog(msg){
-  log.innerHTML += msg+"<br>";
+const video = document.getElementById("reader");
+const log = document.getElementById("log");
+const beep = document.getElementById("beep");
+
+// ここに WebアプリのデプロイURLを置き換えて
+const WEB_APP_URL = "YOUR_WEB_APP_URL_HERE";
+
+function append(msg){
+  log.innerHTML += msg + "<br>";
   log.scrollTop = log.scrollHeight;
 }
 
-async function startCamera(){
-  codeReader = new ZXing.BrowserMultiFormatReader();
+// カメラ起動
+async function startScanner(){
+  codeReader = new ZXing.BrowserMultiFormatContinuousReader();
   try{
-    devices = await codeReader.listVideoInputDevices();
-    if(devices.length==0) { appendLog("❌ カメラが見つかりません"); return; }
-    currentIndex = devices.findIndex(d=>d.label.toLowerCase().includes("back"));
-    if(currentIndex<0) currentIndex=0;
-    selectedDeviceId = devices[currentIndex].deviceId;
-    scanLoop();
-    appendLog("📱 カメラ起動: "+devices[currentIndex].label);
-  } catch(e){
-    appendLog("❌ カメラ取得失敗: "+e);
+    devices = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
+    if(devices.length === 0) throw "カメラが見つかりません";
+    selectedDeviceId = devices.find(d => d.label.toLowerCase().includes("back"))?.deviceId || devices[0].deviceId;
+    codeReader.decodeFromVideoDevice(selectedDeviceId, video, (result, err) => {
+      if(result && Date.now() - lastScan > 3000){
+        lastScan = Date.now();
+        const text = result.getText();
+        append("読み取り: "+text);
+        beep.play();
+        sendToSheet(text);
+      }
+    });
+    append("📱 カメラ起動しました: "+devices.find(d=>d.deviceId===selectedDeviceId).label);
+  }catch(e){
+    append("❌ カメラ取得失敗: "+e);
   }
 }
 
-function switchCamera(){
-  if(devices.length<2) return;
-  currentIndex = (currentIndex+1)%devices.length;
-  selectedDeviceId = devices[currentIndex].deviceId;
-  appendLog("🔄 カメラ切替: "+devices[currentIndex].label);
-  scanLoop();
+// カメラ切替
+async function switchCamera(){
+  if(devices.length < 2) return;
+  let index = devices.findIndex(d=>d.deviceId===selectedDeviceId);
+  index = (index+1)%devices.length;
+  selectedDeviceId = devices[index].deviceId;
+  codeReader.reset();
+  startScanner();
 }
 
-function scanLoop(){
-  if(codeReader) codeReader.reset();
-  codeReader.decodeFromVideoDevice(selectedDeviceId, video, (result, err)=>{
-    if(result){
-      const now = Date.now();
-      if(now - lastScanTime < 3000) return;
-      lastScanTime = now;
-      const text = result.getText();
-      appendLog("読み取り: "+text);
-      beep.play();
-      sendToServer(text);
-    }
-    if(err && !(err instanceof ZXing.NotFoundException)) {
-      console.error(err);
-    }
-  });
-}
-
-function sendToServer(text){
-  fetch("https://script.google.com/macros/s/AKfycbw5BLwkWMOmMiYulfZgrk-3v6tlJhDya2A9arjUb_aqZj-FO3eXygJbX8zCBVZS0Ywn/exec",{
-    method:"POST",
-    body: JSON.stringify({text:text}),
-    headers: {"Content-Type":"application/json"}
-  })
-  .then(r=>r.json())
-  .then(j=>{
-    if(j.status==="ok") appendLog("✅ 書き込み完了: "+j.message);
-    else appendLog("❌ 書き込み失敗: "+j.message);
-  })
-  .catch(e=>appendLog("❌ 書き込み失敗: "+e));
+// スプレッドシートに送信
+async function sendToSheet(text){
+  try{
+    const res = await fetch(https://script.google.com/macros/s/AKfycbzlxHbev18P_mgt_aJ5UU14g1iGKqDdcTPqQ0g9LMRL0JMDu1hp20VMryWideNXZrU-/exec,{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({text:text})
+    });
+    const json = await res.json();
+    if(json.status==="ok") append("✅ "+json.message);
+    else append("❌ "+json.message);
+  }catch(err){
+    append("❌ 書き込み失敗: "+err);
+  }
 }
 </script>
 </body>
