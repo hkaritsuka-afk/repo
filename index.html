@@ -38,10 +38,9 @@ function appendLog(msg){
   log.scrollTop = log.scrollHeight;
 }
 
-// スプレッドシートに送信
 async function sendToSheet(text){
   try{
-    const res = await fetch("https://script.google.com/macros/s/AKfycbwZod-o3kYJKMBvosKZOQ_NrlvZJCYbht6c8AFaX5EPfJGnICKMakMRKdPkeVlvgcnD/exec",{
+    const res = await fetch("https://script.google.com/macros/s/AKfycbyDgkPzGWKUunv--KWj6iG4GmaI4WhkuTkqKxw7c2C4pl81qWj7IBUr8dHCokhcS4ew/exec",{
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify({text:text})
@@ -58,14 +57,12 @@ async function sendToSheet(text){
   }
 }
 
-// カメラ起動
 async function startScanner(){
   if(!html5QrCode) html5QrCode = new Html5Qrcode("reader");
 
   try{
     devices = await Html5Qrcode.getCameras();
     if(devices.length===0) throw new Error("カメラが見つかりません");
-    // 背面カメラ優先
     currentCameraIndex = devices.findIndex(d => d.label.toLowerCase().includes("back"));
     if(currentCameraIndex<0) currentCameraIndex = 0;
     await html5QrCode.start(devices[currentCameraIndex].id,{
@@ -78,7 +75,6 @@ async function startScanner(){
   }
 }
 
-// カメラ切替
 async function switchCamera(){
   if(devices.length<2) return;
   await html5QrCode.stop();
@@ -90,10 +86,9 @@ async function switchCamera(){
   appendLog(`🔄 カメラ切替: ${devices[currentCameraIndex].label}`);
 }
 
-// 読み取り成功
 function onScanSuccess(decodedText){
   const now = Date.now();
-  if(now - lastScanTime < 3000) return; // 3秒間隔
+  if(now - lastScanTime < 3000) return;
   lastScanTime = now;
   appendLog(`読み取り: ${decodedText}`);
   sendToSheet(decodedText);
