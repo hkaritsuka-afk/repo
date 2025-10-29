@@ -77,7 +77,7 @@ async function switchCamera(){
 // スプレッドシートに送信
 async function sendToSheet(text){
   try{
-    const res = await fetch(https://script.google.com/macros/s/AKfycbzlxHbev18P_mgt_aJ5UU14g1iGKqDdcTPqQ0g9LMRL0JMDu1hp20VMryWideNXZrU-/exec,{
+    const res = await fetch("https://script.google.com/macros/s/AKfycbzlxHbev18P_mgt_aJ5UU14g1iGKqDdcTPqQ0g9LMRL0JMDu1hp20VMryWideNXZrU-/exec",{
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify({text:text})
