@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>卸検品QR/JANスキャン</title>
+    <script src="https://unpkg.com/html5-qrcode@2.3.7/minified/html5-qrcode.min.js"></script>
+    <style>
+      body { font-family: sans-serif; text-align:center; margin:20px; background:#f0f4f8; }
+      #reader { width:300px; margin:20px auto; border:2px solid #2b8a3e; border-radius:10px; }
+      #log { background:white; border:1px solid #ccc; border-radius:8px; width:90%; max-width:400px; margin:20px auto; padding:10px; height:180px; overflow-y:auto; text-align:left;}
+      button { padding:10px 20px; margin:5px; border:none; border-radius:8px; background:#2b8a3e; color:white; font-size:16px; cursor:pointer;}
+      button:hover { background:#1d6e30;}
+    </style>
+  </head>
+  <body>
+    <h1>卸検品QR/JANスキャン</h1>
+    <div id="reader"></div>
+    <div>
+      <button onclick="startScanner()">📱 カメラ起動</button>
+      <button onclick="switchCamera()">🔄 カメラ切替</button>
+    </div>
+    <div id="log"></div>
+
+    <script>
+      let html5QrCode;
+      let lastScan = 0;
+      let devices = [];
+      let currentCamera = 0;
+      const beep = new Audio("https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg");
+
+      async function startScanner() {
+        html5QrCode = new Html5Qrcode("reader");
+        try {
+          devices = await Html5Qrcode.getCameras();
+          if (!devices || devices.length === 0) throw "カメラが見つかりません";
+          // 背面カメラ優先
+          currentCamera = devices.findIndex(d => d.facingMode === "environment");
+          if (currentCamera < 0) currentCamera = 0;
+          startCamera();
+        } catch (err) {
+          alert("カメラ取得失敗: "+err);
+        }
+      }
+
+      function startCamera() {
+        const config = { fps: 10, qrbox: 250, formatsToSupport: [ Html5QrcodeSupportedFormats.QR_CODE, Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.DATA_MATRIX ]};
+        html5QrCode.start(devices[currentCamera].id, config, onScanSuccess)
+          .then(() => appendLog("📱 カメラ起動: "+devices[currentCamera].label))
+          .catch(err => appendLog("❌ カメラ起動失敗: "+err));
+      }
+
+      function switchCamera() {
+        if (devices.length < 2) return;
+        html5QrCode.stop().then(() => {
+          currentCamera = (currentCamera+1) % devices.length;
+          startCamera();
+        });
+      }
+
+      function appendLog(msg) {
+        const log = document.getElementById("log");
+        log.innerHTML += msg+"<br>";
+        log.scrollTop = log.scrollHeight;
+      }
+
+      function onScanSuccess(decodedText) {
+        const now = Date.now();
+        if (now - lastScan < 3000) return; // 3秒間隔
+        lastScan = now;
+
+        beep.play();
+        appendLog("読み取り: "+decodedText);
+
+        fetch("https://script.google.com/macros/s/AKfycbxFO9X3-XvHUKOQu8W1Uj2YElpRQDtLLv6O9GCG1cN6tUUCBZTja_3rSkLt3Ar9a501/exec", { // デプロイしたApps Script URLに置き換え
+          method:"POST",
+          body: JSON.stringify({code: decodedText})
+        })
+        .then(r=>r.json())
+        .then(res => {
+          if(res.status==="ok") appendLog("✅ 書き込み完了: V"+res.row);
+          else appendLog("❌ 書き込み失敗: "+res.message);
+        })
+        .catch(err => appendLog("❌ 書き込み失敗: "+err));
+      }
+    </script>
+  </body>
+</html>
