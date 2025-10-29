@@ -1,88 +1,103 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <title>卸検品スキャン</title>
-  <style>
-    body { font-family:sans-serif; text-align:center; margin:20px; }
-    video { width: 90%; max-width:400px; border:2px solid #2b8a3e; border-radius:10px; }
-    button { padding:10px 20px; margin:5px; border:none; border-radius:5px; background:#2b8a3e; color:white; font-size:16px; cursor:pointer; }
-    #log { margin-top:15px; max-width:400px; margin-left:auto;margin-right:auto; border:1px solid #ccc; padding:10px; height:150px; overflow:auto; text-align:left;}
-  </style>
+<meta charset="UTF-8">
+<title>卸検品スキャン</title>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
+<style>
+  body { font-family: "Segoe UI", sans-serif; text-align:center; background:#f0f4f8; margin:0; padding:0;}
+  h1 { color:#2b8a3e; margin:20px 0; }
+  #video-container { position: relative; display:inline-block; margin-top:10px; }
+  video { width:300px; height:300px; border:2px solid #2b8a3e; border-radius:10px; }
+  #controls { margin-top:10px; }
+  button { margin:5px; padding:10px 15px; font-size:16px; border:none; border-radius:8px; background:#2b8a3e; color:white; cursor:pointer; }
+  button:hover { background:#1d6e30; }
+  #log { width:90%; max-width:400px; margin:10px auto; padding:10px; background:white; border:1px solid #ccc; border-radius:8px; text-align:left; font-size:14px; height:180px; overflow-y:auto; }
+</style>
 </head>
 <body>
+<h1>卸検品 QR / JAN スキャン</h1>
 
-<h1>卸検品QR/JANスキャン</h1>
-<video id="video" autoplay></video><br>
-<button onclick="startCamera()">📷 カメラ起動</button>
-<button onclick="switchCamera()">🔄 カメラ切替</button>
+<div id="video-container">
+  <video id="video" autoplay muted></video>
+</div>
+
+<div id="controls">
+  <button onclick="startCamera()">📱 カメラ起動</button>
+  <button onclick="switchCamera()">🔄 カメラ切替</button>
+</div>
+
 <div id="log"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
-
 <script>
-let video = document.getElementById("video");
-let log = document.getElementById("log");
-let currentDeviceId = null;
+let selectedDeviceId = null;
 let devices = [];
+let currentIndex = 0;
+let codeReader = null;
+let lastScanTime = 0;
+const log = document.getElementById("log");
+const video = document.getElementById("video");
+const beep = new Audio("https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg");
 
-async function startCamera() {
-  try {
-    devices = await navigator.mediaDevices.enumerateDevices();
-    devices = devices.filter(d => d.kind === 'videoinput');
-    if (devices.length === 0) throw "カメラが見つかりません";
+function appendLog(msg){
+  log.innerHTML += msg+"<br>";
+  log.scrollTop = log.scrollHeight;
+}
 
-    // 背面カメラ優先
-    let backCamera = devices.find(d => d.label.toLowerCase().includes('back'));
-    currentDeviceId = backCamera ? backCamera.deviceId : devices[0].deviceId;
-
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: currentDeviceId } } });
-    video.srcObject = stream;
-    video.play();
-    logMessage("📱 カメラ起動");
-
-    requestAnimationFrame(scanFrame);
-  } catch (e) {
-    alert("カメラ起動失敗: "+e);
+async function startCamera(){
+  codeReader = new ZXing.BrowserMultiFormatReader();
+  try{
+    devices = await codeReader.listVideoInputDevices();
+    if(devices.length==0) { appendLog("❌ カメラが見つかりません"); return; }
+    currentIndex = devices.findIndex(d=>d.label.toLowerCase().includes("back"));
+    if(currentIndex<0) currentIndex=0;
+    selectedDeviceId = devices[currentIndex].deviceId;
+    scanLoop();
+    appendLog("📱 カメラ起動");
+  } catch(e){
+    appendLog("❌ カメラ取得失敗: "+e);
   }
 }
 
-function switchCamera() {
-  if (devices.length < 2) return;
-  let index = devices.findIndex(d=>d.deviceId===currentDeviceId);
-  currentDeviceId = devices[(index+1)%devices.length].deviceId;
-  startCamera();
+function switchCamera(){
+  if(devices.length<2) return;
+  currentIndex = (currentIndex+1)%devices.length;
+  selectedDeviceId = devices[currentIndex].deviceId;
+  appendLog("🔄 カメラ切替: "+devices[currentIndex].label);
+  scanLoop();
 }
 
-function logMessage(msg){ log.innerHTML += msg+"<br>"; log.scrollTop = log.scrollHeight; }
+function scanLoop(){
+  if(codeReader) codeReader.reset();
+  codeReader.decodeFromVideoDevice(selectedDeviceId, video, (result, err)=>{
+    if(result){
+      const now = Date.now();
+      if(now - lastScanTime < 3000) return;
+      lastScanTime = now;
+      const text = result.getText();
+      appendLog("読み取り: "+text);
+      beep.play();
+      sendToServer(text);
+    }
+    if(err && !(err instanceof ZXing.NotFoundException)) {
+      console.error(err);
+    }
+  });
+}
 
-function scanFrame() {
-  if (!video.videoWidth) { requestAnimationFrame(scanFrame); return; }
-
-  const canvas = document.createElement("canvas");
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(video,0,0,canvas.width,canvas.height);
-  const imageData = ctx.getImageData(0,0,canvas.width,canvas.height);
-
-  const code = jsQR(imageData.data, canvas.width, canvas.height);
-  if(code){
-    logMessage("読み取り: "+code.data);
-    // ここで Apps Script サーバーに送信
-    fetch("YOUR_APPS_SCRIPT_WEBAPP_URL", {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({code: code.data})
-    })
-    .then(r=>r.text())
-    .then(res=>logMessage("✅ "+res))
-    .catch(err=>logMessage("❌ 書き込み失敗: "+err));
-  }
-
-  requestAnimationFrame(scanFrame);
+function sendToServer(text){
+  fetch("https://script.google.com/macros/s/AKfycbwcQ-AuGoQm7KMvCK_S8J24MRV5YtdFBY06YIFEkWlY3nizhlQiy-HVFug5zTdYjxm2/exec",{
+    method:"POST",
+    body: JSON.stringify({text:text}),
+    headers: {"Content-Type":"application/json"}
+  })
+  .then(r=>r.json())
+  .then(j=>{
+    if(j.status==="ok") appendLog("✅ 書き込み完了: "+j.message);
+    else appendLog("❌ 書き込み失敗: "+j.message);
+  })
+  .catch(e=>appendLog("❌ 書き込み失敗: "+e));
 }
 </script>
-
 </body>
 </html>
